@@ -1,14 +1,75 @@
+# Redpanda = Kafka-API-compatible broker, single binary, no Zookeeper, no JVM.
+# Sized deliberately small for a 16GB RAM / dual-core laptop (Latitude E5570).
+# Don't run this alongside Spark + MinIO at the same time until you've
+# confirmed free RAM with `free -h` -- bring up only what you're working on.
+
 services:
   redpanda:
-    image: redpandadata/redpanda:latest
+    image: redpandadata/redpanda:v24.2.7
+    container_name: redpanda
     command:
-      - redpanda start
-      - --smp 1
-      - --memory 1G
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
       - --overprovisioned
-      - --node-id 0
-      - --kafka-addr PLAINTEXT://0.0.0.0:9092
-      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+      - --pandaproxy-addr=PLAINTEXT://0.0.0.0:8082
+      - --advertise-pandaproxy-addr=PLAINTEXT://localhost:8082
     ports:
-      - "9092:9092"
+      - "9092:9092"   # Kafka API (this is what your Python producer connects to)
+      - "8082:8082"   # HTTP proxy (optional, useful for quick curl checks)
+      - "9644:9644"   # Admin API / metrics
     mem_limit: 1200m
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+
+  # Optional lightweight web UI to browse topics/messages visually.
+  # Comment this out if RAM is tight -- it's a "nice to have", not required.
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    container_name: redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    mem_limit: 300m
+    depends_on:
+      - redpanda
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API (what Spark connects to)
+      - "9001:9001"   # Web console (http://localhost:9001)
+    mem_limit: 512m
+    volumes:
+      - minio-data:/data
+
+  # One-shot container that creates the bronze/silver/gold buckets on startup,
+  # then exits. Safe to ignore its "exited (0)" status in `docker ps -a`.
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}; do sleep 1; done;
+      mc mb --ignore-existing local/bronze;
+      mc mb --ignore-existing local/silver;
+      mc mb --ignore-existing local/gold;
+      echo 'buckets ready';
+      "
+
+volumes:
+  redpanda-data:
+  minio-data:

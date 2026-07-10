@@ -1,1 +1,24 @@
+# Data (too heavy for Git -- see README for download instructions)
 data/
+
+# Secrets -- never commit real credentials
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Spark / Delta
+spark-warehouse/
+derby.log
+metastore_db/
+
+# Logs
+*.log
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
