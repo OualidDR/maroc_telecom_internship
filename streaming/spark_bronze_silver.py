@@ -45,7 +45,7 @@ SILVER_PATH = "s3a://silver/flows"
 BRONZE_CHECKPOINT = "s3a://bronze/_checkpoints/flows"
 SILVER_CHECKPOINT = "s3a://silver/_checkpoints/flows"
 
-MAX_OFFSETS_PER_TRIGGER = 700  # small batches, gentle on 2 cores / limited RAM
+MAX_OFFSETS_PER_TRIGGER = 500  # small batches, gentle on 2 cores / limited RAM
 
 
 def build_spark() -> SparkSession:
@@ -156,13 +156,21 @@ def main():
         "event.flow.*",
     )
 
+    # Delta Lake forbids spaces in column names -- the raw CSV has
+    # "Attack Type" / "Attack Tool", which must be renamed before any write.
+    silver_df = (
+        silver_df
+        .withColumnRenamed("Attack Type", "attack_type")
+        .withColumnRenamed("Attack Tool", "attack_tool")
+    )
+
     silver_query = (
         silver_df.writeStream
         .format("delta")
         .outputMode("append")
         .option("checkpointLocation", SILVER_CHECKPOINT)
         .trigger(processingTime="10 seconds")
-        .partitionBy("Attack Type")
+        .partitionBy("attack_type")
         .start(SILVER_PATH)
     )
 
