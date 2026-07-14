@@ -22,3 +22,8 @@ metastore_db/
 .DS_Store
 .vscode/
 .idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+modeling/artifacts/
