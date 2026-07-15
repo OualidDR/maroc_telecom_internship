@@ -36,6 +36,16 @@ DROPPED_COLUMNS = {
     "Max": "100% identical to Dur on every row -- redundant.",
     "sVid": "Zero variance (constant = 610 where not null) and >90% missing -- no signal.",
     "dVid": "Zero variance (constant = 610 where not null) and >99% missing -- no signal.",
+    "Offset": (
+    "Argus internal byte offset into the source capture. In Combined.csv, "
+    "attack classes occupy contiguous non-overlapping offset ranges "
+    "(e.g. ICMPFlood: 149K-634K only; UDPScan: 6K-940K only) because the "
+    "dataset was assembled by concatenating per-class captures in order. "
+    "This makes Offset a near-perfect leaky proxy for Attack Type in this "
+    "dataset, while carrying no meaningful signal in production streaming. "
+    "Detected via RF feature importance ranking Offset #1 (11.6%) despite "
+    "having no plausible causal link to attack behavior."
+),
 }
 
 
@@ -100,7 +110,6 @@ FEATURE_SCHEMA: list[FeatureSpec] = [
     FeatureSpec("TotBytes", "int", False, "Total bytes, both directions."),
     FeatureSpec("SrcBytes", "int", False, "Bytes sent by source."),
     FeatureSpec("DstBytes", "int", False, "Bytes sent by destination."),
-    FeatureSpec("Offset", "int", False, "Argus internal byte offset."),
     FeatureSpec("sMeanPktSz", "float", False, "Mean packet size, source side."),
     FeatureSpec("dMeanPktSz", "float", False, "Mean packet size, destination side."),
 
@@ -164,7 +173,7 @@ EVENT_WRAPPER_EXAMPLE = {
     "flow": "{...39 raw feature fields + 3 label fields...}",
 }
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.0.1"
 
 
 if __name__ == "__main__":
