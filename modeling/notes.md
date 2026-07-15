@@ -272,6 +272,115 @@ between runs.
 
 ---
 
+## Dimensionality reduction — considered and rejected
+
+Principal Component Analysis, Linear Discriminant Analysis, and Locally
+Linear Embedding were considered as alternative approaches to improve
+Benign↔UDPFlood separability but rejected on principle. These methods
+project features into lower-dimensional spaces but do not add discriminative
+information not already present in the original representation. Since
+three model families (linear, bagged trees, gradient-boosted trees) already
+achieved similar performance on the raw features, and targeted engineered
+features (ratios, log-transforms) produced no improvement, the residual
+confusion is attributable to genuine overlap of the two classes in the
+single-flow feature space rather than to representation choice. No
+supervised linear projection (LDA) can separate classes that overlap in
+the original feature space, and PCA preserves variance without regard to
+class boundaries.
+
+The information required to resolve the confusion (temporal aggregation,
+source diversity, cross-flow correlation) is not derivable from single-flow
+summary statistics and requires an architecturally different modeling
+framing beyond the scope of this project.
+
+## Binary vs multiclass framing
+
+A binary XGBoost model (Benign vs Malicious) was trained to test whether
+reframing the task as a binary decision would resolve the Benign↔UDPFlood
+confusion in the multiclass model. Result: the binary model achieved
+ROC-AUC 0.87, materially worse than the multiclass model's implicit binary
+performance (0.996 malicious recall, 0.42 benign recall — corresponding
+to a much stronger separation).
+
+Diagnostic: the binary model concentrated 48% of feature importance on
+a single TCP-only feature (SrcGap), suggesting it exploited a shortcut
+separating TCP-heavy attack traffic from mixed benign traffic. The
+multiclass model was forced to learn distinct patterns for each attack
+type (dominated by State_ECO, Proto_udp, State_INT connection-state
+signals) and its aggregated behavior is a stronger implicit binary
+classifier.
+
+This is a case where multiclass framing improves binary performance:
+the constraint of distinguishing between attack types forces the model
+to learn richer discriminative features than a directly-trained binary
+classifier will discover on its own. As a consequence, both the standalone
+binary framing and the hierarchical two-stage approach (binary → then
+multiclass) were rejected in favor of the direct multiclass classifier.
+
+## Specialist ablation — confirmed ceiling
+
+The specialist Benign↔UDPFlood classifier was retrained without sMeanPktSz
+to test whether removing the dominant feature would force it to learn a
+richer pattern (analogous to how multiclass training forces feature
+diversity).
+
+Result: metrics were identical to two decimal places (ROC-AUC 0.7942 in
+both runs; Benign recall 0.42; UDPFlood recall 0.98; F1 0.76). Only the
+feature-importance distribution changed: bytes_per_packet (TotBytes/TotPkts,
+an engineered feature) took 82% of the importance, replacing sMeanPktSz.
+Both features are packet-size proxies derivable from the same underlying
+quantities.
+
+This confirms the ceiling result more strongly than any prior experiment:
+the Benign↔UDPFlood confusion is not attributable to any specific feature.
+The tool-fingerprint / traffic-similarity signal is embedded structurally
+in per-flow measurements, and any feature capturing packet-size information
+carries it. Removing one such feature causes the model to fall back on
+another, arriving at the same decision boundary. No amount of feature
+selection can lift the boundary because the discriminative information
+required is not present in single-flow data — it exists only in
+cross-flow contextual signals not measured in this dataset.
+
+## Model space exploration
+
+Beyond the three families reported (Logistic Regression, Random Forest,
+XGBoost), other supervised classification approaches (LightGBM, CatBoost,
+Support Vector Machines, k-Nearest Neighbors, deep tabular neural networks)
+were considered but not evaluated. This decision was based on the consistent
+performance ceiling observed across the three primary models on the specific
+subtask (Benign↔UDPFlood specialist ROC-AUC 0.79, identical whether or not
+the dominant packet-size feature was included). Since the ceiling stems from
+overlapping class distributions in per-flow feature space rather than any
+one model's expressiveness limits, alternative supervised classifiers would
+be expected to plateau at the same performance level. Improving results
+beyond this ceiling requires an architectural change in problem framing —
+specifically incorporating temporal or cross-flow contextual signals not
+available in the single-flow dataset used here — rather than substituting
+one supervised classifier for another.
+
+## Manual class weights — final confirmation of the trade-off curve
+
+A final attempt to improve Benign recall without sacrificing UDPFlood used
+manual class weights instead of sample_weight='balanced' (Benign: 1.5,
+UDPFlood: 0.7, rare attack classes: 3-10). Result: Benign recall reached
+1.00 while UDPFlood recall collapsed to 0.23 — the model now misses 77% of
+UDP floods.
+
+This confirms with the highest possible confidence that the Benign↔UDPFlood
+trade-off is not addressable by any means available within the current data.
+Across five mechanisms — model architecture, feature engineering,
+inference-time thresholding, binary reframing, and training-time class
+weighting — every configuration produces a different operating point on
+the same trade-off curve. The curve does not shift; only the operating
+point moves along it. Any Benign recall improvement comes at exact
+proportional cost to UDPFlood recall.
+
+Decision: production model uses XGBoost multiclass with sample_weight=
+'balanced'. This operating point (Benign 0.41, UDPFlood 0.996) is chosen
+because in intrusion detection, near-perfect attack recall is the primary
+operational requirement, and Benign false positives can be handled by
+downstream analyst review or contextual filtering.
+
 ## References
 
 - Grinsztajn, L., Oyallon, E., & Varoquaux, G. (2022). *Why do tree-based

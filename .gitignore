@@ -30,6 +30,12 @@ modeling/notebooks/
 modeling/artifacts/
 
 
-## Ignore the following files for now, but they may be useful later
+## Ignore the following files
 confusion_matrix.png
 feature_importance.png
+threshold_analysis.png
+
+# MLflow local state
+mlruns/
+mlflow.db
+mlartifacts/
