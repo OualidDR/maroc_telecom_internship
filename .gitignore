@@ -25,5 +25,11 @@ metastore_db/
 
 # Jupyter
 .ipynb_checkpoints/
+modeling/notebooks/
 
 modeling/artifacts/
+
+
+## Ignore the following files for now, but they may be useful later
+confusion_matrix.png
+feature_importance.png

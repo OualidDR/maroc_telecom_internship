@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from .feature_engineering import add_engineered_features
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(REPO_ROOT))
@@ -12,24 +13,28 @@ from contracts.schemas import (
 )
 
 
-def load_clean_csv(csv_path: str) -> pd.DataFrame:
+def load_clean_csv(csv_path: str, engineer: bool = True) -> pd.DataFrame:
+    """Load Combined.csv and apply the contract preprocessing.
 
+    Args:
+        csv_path: path to Combined.csv
+        engineer: if True, add engineered features from feature_engineering.py
+    """
     df = pd.read_csv(csv_path, low_memory=False)
 
-    # Drop junk columns
-    df = df.drop(columns=[col for col in DROPPED_COLUMNS if col in df.columns])
+    df = df.drop(columns=list(DROPPED_COLUMNS.keys()))
 
-    # Add structural indicators
     df["is_tcp"] = (df["Proto"] == "tcp").astype(int)
     df["has_dst_reply"] = df["dTtl"].notna().astype(int)
 
-    # Fill NaNs in numeric feature columns with sentinel value
     numeric_cols = [f.name for f in FEATURE_SCHEMA if f.dtype in ("float", "int")]
     df[numeric_cols] = df[numeric_cols].fillna(NULL_SENTINEL)
 
-    # One-hot encode categorical columns
     categorical_cols = [f.name for f in FEATURE_SCHEMA if f.dtype == "category"]
     df = pd.get_dummies(df, columns=categorical_cols, drop_first=False)
+
+    if engineer:
+        df = add_engineered_features(df)
 
     return df
 
@@ -39,17 +44,26 @@ DEFAULT_CSV_PATH = REPO_ROOT / "data" / "raw" / "Combined.csv"
 
 
 def load_or_build(
-    csv_path: str, cache_path: str = DEFAULT_CACHE_PATH
+    csv_path: str,
+    cache_path: str = None,
+    engineer: bool = True,
 ) -> pd.DataFrame:
     """Load preprocessed data from cache if available, else build and cache."""
+    if cache_path is None:
+        cache_path = (
+            "modeling/artifacts/processed/clean_engineered.parquet"
+            if engineer
+            else "modeling/artifacts/processed/clean.parquet"
+        )
+
     cache = Path(cache_path)
 
     if cache.exists():
         print(f"Loading cached preprocessed data from {cache}")
         return pd.read_parquet(cache)
 
-    print("No cache found — running preprocessing...")
-    df = load_clean_csv(csv_path)
+    print(f"No cache found at {cache} — running preprocessing...")
+    df = load_clean_csv(csv_path, engineer=engineer)
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache)

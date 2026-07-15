@@ -14,6 +14,12 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from sklearn.metrics import ConfusionMatrixDisplay
 from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_sample_weight
+import mlflow.xgboost
+
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SPLITS_DIR = REPO_ROOT / "modeling" / "artifacts" / "splits"
@@ -279,5 +285,87 @@ def train_random_forest():
         print("\nTop 10 features by importance:")
         print(top20.head(10))
         
+def train_xgboost():
+    X_train, X_val, y_train, y_val = load_splits()
+
+    # XGBoost needs integer labels
+    le = LabelEncoder()
+    y_train_enc = le.fit_transform(y_train)
+    y_val_enc = le.transform(y_val)
+
+    # Handle class imbalance via sample weights (XGBoost's equivalent to class_weight='balanced')
+    sample_weights = compute_sample_weight("balanced", y_train_enc)
+
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
+    with mlflow.start_run(run_name="xgboost_engineered_features"):
+        params = {
+            "model": "XGBClassifier",
+            "n_estimators": 200,
+            "max_depth": 6,
+            "learning_rate": 0.1,
+            "class_weighting": "balanced_sample_weights",
+            "n_jobs": -1,
+            "random_state": 42,
+            "features": "baseline + engineered (ratios + logs)"
+        }
+        mlflow.log_params(params)
+
+        model = XGBClassifier(
+            n_estimators=200,
+            max_depth=6,
+            learning_rate=0.1,
+            n_jobs=-1,
+            random_state=42,
+            tree_method="hist",   # fast histogram-based training
+        )
+        model.fit(X_train, y_train_enc, sample_weight=sample_weights)
+
+        y_pred_enc = model.predict(X_val)
+        y_pred = le.inverse_transform(y_pred_enc)
+
+        report = classification_report(y_val, y_pred, output_dict=True)
+        mlflow.log_metric("macro_f1", f1_score(y_val, y_pred, average="macro"))
+        mlflow.log_metric("weighted_f1", f1_score(y_val, y_pred, average="weighted"))
+        mlflow.log_metric("accuracy", report["accuracy"])
+        for class_name, metrics in report.items():
+            if isinstance(metrics, dict) and class_name not in ("macro avg", "weighted avg"):
+                mlflow.log_metric(f"recall_{class_name}", metrics["recall"])
+                mlflow.log_metric(f"f1_{class_name}", metrics["f1-score"])
+
+        mlflow.xgboost.log_model(model, name="model")
+
+        importance = pd.Series(
+            model.feature_importances_, index=X_train.columns
+        ).sort_values(ascending=False)
+
+        # ... same confusion matrix + feature importance logging as before ...
+        # Log confusion matrix
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ConfusionMatrixDisplay.from_predictions(
+            y_val, y_pred, ax=ax, xticks_rotation=45
+        )
+        plt.tight_layout()
+        plt.savefig("confusion_matrix.png")
+        mlflow.log_artifact("confusion_matrix.png")
+        plt.close()
+        
+        
+        # Feature importance
+        top20 = importance.head(20)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        top20.plot.barh(ax=ax)
+        ax.set_title("Top 20 feature importances (mean |coef|)")
+        plt.tight_layout()
+        plt.savefig("feature_importance.png")
+        mlflow.log_artifact("feature_importance.png")
+        plt.close()
+        
+
+        print(classification_report(y_val, y_pred))
+        print("\nTop 10 features by importance:")
+        print(top20.head(10))
+
+
 if __name__ == "__main__":
-    train_logreg_no_toolprint()
+    train_xgboost()
