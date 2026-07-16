@@ -48,7 +48,7 @@ if __name__ == "__main__":
     sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
     from modeling.src.preprocessing import load_or_build
 
-    df = load_or_build("data/raw/Combined.csv")
+    df = load_or_build("data/raw/Combined.csv", engineer=False)
     splits = make_splits(df)
     X_train, X_val, X_test, y_train, y_val, y_test = splits
 

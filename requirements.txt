@@ -7,3 +7,4 @@ scikit-learn==1.7.2
 pyarrow
 mlflow
 xgboost
+shap
