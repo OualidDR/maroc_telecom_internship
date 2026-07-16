@@ -8,3 +8,4 @@ pyarrow
 mlflow
 xgboost
 shap
+fastapi
