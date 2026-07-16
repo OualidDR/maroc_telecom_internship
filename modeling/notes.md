@@ -381,6 +381,30 @@ because in intrusion detection, near-perfect attack recall is the primary
 operational requirement, and Benign false positives can be handled by
 downstream analyst review or contextual filtering.
 
+## sHops distribution — confirms Benign↔UDPFlood mechanism
+
+Post-hoc SHAP investigation of sHops (source-hop count) revealed:
+
+- All flood/DoS attack classes concentrated at sHops = 1 (zero std):
+  HTTPFlood, ICMPFlood, SlowrateDoS, UDPFlood
+- Scan attack classes concentrated at sHops ~17 (std ~6-7): SYNScan, UDPScan
+- Benign traffic spans the full range (mean 3.0, std 3.1, range 0-28),
+  overlapping with both attack regions
+
+The subset of Benign traffic with sHops = 1 is behaviorally indistinguishable
+from flood attacks on this feature. Combined with the earlier finding that
+Proto_udp is the second SHAP driver of Benign→UDPFlood misclassification,
+this explains the confusion mechanically: benign UDP flows one hop from the
+observer occupy the same region of (Proto_udp, sHops) space as UDPFloods,
+with no discriminating signal in single-flow measurements to separate them.
+
+This finding also raises a dataset-representativeness caveat: the lab
+generation placed flooders at 1 hop and scanners at ~17 hops. Real-world
+attackers using distributed botnets could produce floods from arbitrary
+hop counts, which the model has learned to associate with benign traffic.
+This is not addressable within the current dataset but should be flagged as
+a limitation of production deployment.
+
 ## References
 
 - Grinsztajn, L., Oyallon, E., & Varoquaux, G. (2022). *Why do tree-based
