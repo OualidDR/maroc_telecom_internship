@@ -1,0 +1,74 @@
+
+# Connexion Snowflake — ce qu'il faut décider avant d'implémenter
+
+**De :** [Ton nom] (Data Engineer)
+**Pour :** [Nom du collègue] (Data Scientist)
+**Contexte :** `SILVER_FLOWS` est maintenant chargée dans Snowflake (`NIDD_DB.SILVER.SILVER_FLOWS`), à partir de la table Silver produite par le pipeline Kafka → Spark → MinIO. Ce document liste ce qu'il faut trancher/anticiper avant de brancher ton pipeline dessus — pas encore d'implémentation, juste les décisions à prendre.
+
+---
+
+## 1. Que doit remplacer Snowflake dans ton pipeline ?
+
+Deux options possibles, à choisir ensemble :
+
+- **Option A** — Snowflake remplace `pd.read_csv(DEFAULT_CSV_PATH)` comme source d'entraînement. Tu gardes `preprocessing.py`, `feature_engineering.py`, `splits.py` tels quels, seule la première étape de lecture change (requête SQL au lieu de lire le CSV).
+- **Option B** — Snowflake sert uniquement au reporting (dbt / Power BI plus tard), et tu continues d'entraîner depuis le CSV/Silver local.
+
+**Recommandation** : Option A a du sens comme prochaine étape logique, mais c'est ton appel — dis-nous ce que tu préfères.
+
+## 2. Ce qui change concrètement dans ton code (si Option A)
+
+Aujourd'hui, `load_clean_csv()` fait : lire le CSV → dropper les colonnes du contrat → ajouter `is_tcp`/`has_dst_reply`.
+
+Les deux premières étapes sont **déjà faites** côté Silver/Snowflake. Ton chargement deviendrait :
+```
+SELECT * FROM NIDD_DB.SILVER.SILVER_FLOWS
+```
+à la place de `pd.read_csv() + drop(columns=DROPPED_COLUMNS)`. Tu enchaînes directement sur tes étapes à toi (sentinelle, one-hot encoding, feature engineering).
+
+## 3. ⚠️ Piège à anticiper : la casse des colonnes
+
+Snowflake stocke tout en **MAJUSCULES** par défaut (`EVENT_ID`, `DUR`, `LABEL`, `ATTACK_TYPE`...), alors que `contracts/schemas.py` utilise la casse mixte (`Dur`, `Label`, `attack_type`...).
+
+**Deux solutions** :
+- Renommer les colonnes en minuscule/casse du contrat juste après la requête (`df.columns = df.columns.str.lower()` puis mapping vers les noms exacts du contrat si besoin), ou
+- Adapter ton code pour lire directement les noms en majuscules
+
+À toi de voir ce qui s'intègre le mieux dans ton pipeline existant.
+
+## 4. ⚠️ Nouvelles colonnes à exclure des features
+
+`SILVER_FLOWS` contient 4 colonnes qui n'existent pas dans `FEATURE_SCHEMA` ni `LABEL_COLUMNS` :
+- `event_id`
+- `ingestion_timestamp`
+- `schema_version`
+- `loaded_at`
+
+Ton `LABEL_COLS = ["Label", "Attack Type", "Attack Tool"]` actuel ne les exclut pas. **Il faut étendre cette liste**, sinon `event_id` (un identifiant unique par ligne) se retrouverait halluciné comme feature d'entraînement — bug silencieux garanti sinon.
+
+## 5. Accès Snowflake — tu auras ton propre compte
+
+Tu n'utiliseras pas mes identifiants. Je vais créer :
+- un **utilisateur Snowflake dédié** pour toi
+- un **rôle en lecture seule** sur `NIDD_DB.SILVER.SILVER_FLOWS` (tu n'as besoin d'écrire nulle part)
+
+Dis-moi quel email/username tu veux pour ce compte.
+
+## 6. Duplication des données côté warehouse
+
+Le chargement actuel fait soit un `append`, soit un `--truncate` + reload complet. Si l'usage devient plus fréquent/continu, il faudra définir une vraie stratégie (truncate+reload complet à chaque run, ou upsert/MERGE sur `event_id` pour l'incrémental). À décider ensemble selon tes besoins réels de fraîcheur des données.
+
+## 7. Fréquence de synchronisation
+
+As-tu besoin de données fraîches à chaque entraînement, ou un chargement périodique (manuel pour l'instant, automatisé plus tard via Airflow) suffit ? Ça détermine si le script de chargement doit tourner à la demande, en cron, ou rester manuel.
+
+---
+
+## Ce qu'on tranche avant de coder
+
+- [ ] Option A ou B (section 1) ?
+- [ ] Qui gère la conversion de casse des colonnes (section 3) ?
+- [ ] Email/username pour ton compte Snowflake en lecture seule (section 5) ?
+- [ ] Fréquence de synchronisation souhaitée (section 7) ?
+
+Réponds sur ces points et on implémente derrière.
