@@ -29,6 +29,7 @@ from pyspark.sql.types import (
 
 sys.path.append(".")
 from contracts.schemas import FEATURE_SCHEMA, LABEL_COLUMNS  # noqa: E402
+from quality.gx_spark_validator import SparkBatchValidator, make_foreach_batch_fn  # noqa: E402
 
 # -----------------------------------------------------------------------------
 # Config -- adjust here if you move to a bigger machine later
@@ -106,6 +107,12 @@ EVENT_SCHEMA = StructType([
 def main():
     spark = build_spark()
     spark.sparkContext.setLogLevel("WARN")
+    # KAFKA-1894: harmless warning spam from the Kafka client's internal
+    # consumer threading model, unrelated to whether the job is working.
+    # Silenced here so real errors/[GX] logs aren't buried under it.
+    spark.sparkContext._jvm.org.apache.log4j.Logger.getLogger(
+        "org.apache.kafka.clients.consumer.internals"
+    ).setLevel(spark.sparkContext._jvm.org.apache.log4j.Level.ERROR)
 
     raw_stream = (
         spark.readStream
@@ -145,6 +152,17 @@ def main():
     # Nulls are left as real nulls (structural, per the contract) -- no
     # imputation happens here, that's a modeling-time decision for the DS side.
     # ---------------------------------------------------------------------
+    # ---------------------------------------------------------------------
+    # SILVER: parsed, typed, and flattened according to contracts/schemas.py.
+    # Nulls are left as real nulls (structural, per the contract) -- no
+    # imputation happens here, that's a modeling-time decision for the DS side.
+    #
+    # Each micro-batch is validated by Great Expectations via foreachBatch
+    # (quality/gx_spark_validator.py) -- the write itself isn't gated on
+    # validation success, but every batch's pass/fail outcome is logged to
+    # s3a://silver/_quality_log/gx_results for later inspection (and future
+    # Grafana dashboards).
+    # ---------------------------------------------------------------------
     parsed_df = raw_stream.select(
         F.from_json(F.col("value").cast("string"), EVENT_SCHEMA).alias("event")
     )
@@ -164,14 +182,16 @@ def main():
         .withColumnRenamed("Attack Tool", "attack_tool")
     )
 
+    validator = SparkBatchValidator()
+    foreach_batch_fn = make_foreach_batch_fn(validator, spark, SILVER_PATH)
+
     silver_query = (
         silver_df.writeStream
-        .format("delta")
         .outputMode("append")
+        .foreachBatch(foreach_batch_fn)
         .option("checkpointLocation", SILVER_CHECKPOINT)
         .trigger(processingTime="10 seconds")
-        .partitionBy("attack_type")
-        .start(SILVER_PATH)
+        .start()
     )
 
     print("Streaming started. Bronze ->", BRONZE_PATH, " Silver ->", SILVER_PATH)

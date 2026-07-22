@@ -15,6 +15,9 @@ spark-warehouse/
 derby.log
 metastore_db/
 
+# Great Expectations -- keep expectation suites, ignore local run results
+quality/gx/uncommitted/
+
 # Logs
 *.log
 
@@ -22,20 +25,3 @@ metastore_db/
 .DS_Store
 .vscode/
 .idea/
-
-# Jupyter
-.ipynb_checkpoints/
-modeling/notebooks/
-
-modeling/artifacts/
-
-
-## Ignore the following files
-confusion_matrix.png
-feature_importance.png
-threshold_analysis.png
-
-# MLflow local state
-mlruns/
-mlflow.db
-mlartifacts/

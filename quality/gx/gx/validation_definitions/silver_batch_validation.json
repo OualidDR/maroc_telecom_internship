@@ -1,0 +1,22 @@
+{
+  "data": {
+    "asset": {
+      "id": "13ca911d-d178-466e-8ab9-c54c42c6cfeb",
+      "name": "silver_batch_df"
+    },
+    "batch_definition": {
+      "id": "92c8691d-6f40-45ad-a630-a852a662f034",
+      "name": "silver_batch"
+    },
+    "datasource": {
+      "id": "93848df0-d133-4c1c-915c-646ba9f3b25a",
+      "name": "pandas_spark_batches"
+    }
+  },
+  "id": "63e92634-2ac1-44d3-bfc8-d86dae9c37fe",
+  "name": "silver_batch_validation",
+  "suite": {
+    "id": "aca20763-4c14-4180-a767-93eeff9fc28f",
+    "name": "silver_flows_suite"
+  }
+}
