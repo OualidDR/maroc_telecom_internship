@@ -95,6 +95,30 @@ def simulate_drift_detection_from_val():
         if "DriftedColumnsCount" in m.get("metric_id", ""):
             print(f"\nDrifted columns: {m['value']['count']} out of {m['value']['share']*100:.1f}%")
 
+def simulate_real_drift():
+    """Prove detection works by feeding it a deliberately drifted batch.
+
+    Takes val and applies distortions (shift means, scale variances) to
+    simulate a distribution change. Evidently should detect this as drift.
+    """
+    print("Simulating REAL drift (deliberately shifted distributions)...")
+    X_val = pd.read_parquet("modeling/artifacts/splits/X_val.parquet")
+    y_val = pd.read_parquet("modeling/artifacts/splits/y_val.parquet").squeeze()
+
+    current = X_val.sample(5000, random_state=1).copy()
+
+    # Shift numerical features by adding noise scaled to their std
+    for col in current.select_dtypes("number").columns:
+        std = current[col].std()
+        if std > 0:
+            current[col] = current[col] + std * 2.0  # shift by 2 std
+
+    current["prediction"] = y_val.loc[current.index].values
+
+    summary = compute_drift(current, save_html=True)
+    print("Report saved. This should show significant drift.")
+
 
 if __name__ == "__main__":
-    simulate_drift_detection_from_val()
+    # simulate_drift_detection_from_val()  # for reference
+    simulate_real_drift()
