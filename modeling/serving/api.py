@@ -174,3 +174,29 @@ def predict(flow: FlowFeatures, explain: bool = False):
         ]
 
     return response
+
+from modeling.monitoring.drift import compute_drift
+
+
+@app.post("/drift")
+def check_drift(batch: list[dict]):
+    """Compute drift for a batch of flows against the reference distribution.
+
+    Body: list of feature dicts (like /predict payloads), optionally with
+    a 'prediction' key. Returns drift summary + saves an HTML report.
+    """
+    if not batch:
+        raise HTTPException(status_code=422, detail="Empty batch")
+
+    # Build the current DataFrame
+    df = pd.DataFrame(batch)
+    if "prediction" not in df.columns:
+        df["prediction"] = "unknown"
+
+    summary = compute_drift(df, save_html=True)
+
+    # Extract just the interesting numbers for the response
+    return {
+        "n_flows_analyzed": len(df),
+        "summary": summary,
+    }
