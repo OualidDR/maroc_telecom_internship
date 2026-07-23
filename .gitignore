@@ -39,3 +39,6 @@ modeling/artifacts/
 
 #notebooks
 modeling/notebooks/
+
+
+batch_payload.json

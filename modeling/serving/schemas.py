@@ -54,3 +54,19 @@ class ModelInfoResponse(BaseModel):
     schema_version: str
     n_features: int
     classes: list[str]
+    
+class BatchFlowRequest(BaseModel):
+    """A batch of preprocessed flows for classification."""
+    flows: list[dict[str, float]] = Field(
+        ...,
+        max_length=1000,
+        description="List of feature dicts. Max 1000 per request.",
+    )
+
+
+class BatchPredictionResponse(BaseModel):
+    """Vectorized predictions in the same order as the input flows."""
+    predictions: list[PredictionResponse]
+    n_flows: int
+    model_version: str
+    schema_version: str

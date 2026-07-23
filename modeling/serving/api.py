@@ -19,6 +19,8 @@ from modeling.serving.schemas import (
     HealthResponse,
     ModelInfoResponse,
     TopFeature,
+    BatchFlowRequest,           # new
+    BatchPredictionResponse,    # new
 )
 
 
@@ -200,3 +202,87 @@ def check_drift(batch: list[dict]):
         "n_flows_analyzed": len(df),
         "summary": summary,
     }
+    
+@app.post("/predict/batch", response_model=BatchPredictionResponse)
+def predict_batch(request: BatchFlowRequest, explain: bool = False):
+    """Classify a batch of flows in one vectorized inference call.
+
+    Designed for the Spark streaming pipeline: sends batches of ~100-500
+    flows per micro-batch, gets back predictions in the same order.
+
+    Query parameter `explain=true` computes SHAP top-5 for every flow.
+    Adds significant latency; only use when the pipeline actually needs
+    explanations (e.g. writing to the Gold layer for analyst review).
+    """
+    if state["model"] is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    if not request.flows:
+        raise HTTPException(status_code=422, detail="Empty batch")
+
+    # Build the batch DataFrame in the model's expected feature order
+    try:
+        X = pd.DataFrame(
+            [
+                [flow.get(col, 0.0) for col in state["feature_columns"]]
+                for flow in request.flows
+            ],
+            columns=state["feature_columns"],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Feature preparation failed: {e}")
+
+    # One vectorized prediction call — this is where the batch speedup comes from
+    proba_matrix = state["model"].predict_proba(X)   # shape (n_flows, n_classes)
+    pred_indices = np.argmax(proba_matrix, axis=1)   # shape (n_flows,)
+
+    classes = state["label_encoder"].classes_
+
+    # Optional SHAP — computed once for the whole batch, not per row
+    top_features_batch = None
+    if explain:
+        booster = state["model"].get_booster()
+        dmatrix = xgb.DMatrix(X)
+        contribs = booster.predict(dmatrix, pred_contribs=True)
+        # Shape: (n_flows, n_classes, n_features + 1) — strip bias column
+        contribs = contribs[:, :, :-1]
+
+    # Build one response per flow
+    responses = []
+    for i, pred_idx in enumerate(pred_indices):
+        proba_row = proba_matrix[i]
+        pred_class = str(classes[pred_idx])
+
+        all_probs = {
+            str(cls): float(proba_row[j])
+            for j, cls in enumerate(classes)
+        }
+
+        top_features = None
+        if explain:
+            class_shap = contribs[i, pred_idx, :]
+            top_k_idx = np.argsort(np.abs(class_shap))[-5:][::-1]
+            top_features = [
+                TopFeature(
+                    feature=state["feature_columns"][j],
+                    value=float(X.iloc[i, j]),
+                    shap_contribution=float(class_shap[j]),
+                )
+                for j in top_k_idx
+            ]
+
+        responses.append(PredictionResponse(
+            predicted_class=pred_class,
+            probability=float(proba_row[pred_idx]),
+            all_probabilities=all_probs,
+            top_features=top_features,
+            model_version=str(state["model_version"]),
+            schema_version=SCHEMA_VERSION,
+        ))
+
+    return BatchPredictionResponse(
+        predictions=responses,
+        n_flows=len(responses),
+        model_version=str(state["model_version"]),
+        schema_version=SCHEMA_VERSION,
+    )
