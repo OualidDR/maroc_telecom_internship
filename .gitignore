@@ -25,3 +25,17 @@ quality/gx/uncommitted/
 .DS_Store
 .vscode/
 .idea/
+
+# MLflow local state
+mlruns/
+mlflow.db
+mlartifacts/
+feature_importance.png
+confusion_matrix.png
+threshold_analysis.png
+
+# Modeling artifacts (regenerable, don't commit)
+modeling/artifacts/
+
+#notebooks
+modeling/notebooks/
