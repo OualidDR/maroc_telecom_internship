@@ -11,5 +11,6 @@ shap
 fastapi
 great_expectations==1.9.0
 deltalake==0.19.1
-snowflake-connector-python[pandas]==3.12.3
 evidently
+snowflake-connector-python[pandas]==4.7.1
+dbt-snowflake==1.12.0

@@ -1,0 +1,10 @@
+attack_type,attack_category
+Benign,Benign
+UDPFlood,DoS
+HTTPFlood,DoS
+SlowrateDoS,DoS
+SYNFlood,DoS
+ICMPFlood,DoS
+TCPConnectScan,Reconnaissance
+SYNScan,Reconnaissance
+UDPScan,Reconnaissance

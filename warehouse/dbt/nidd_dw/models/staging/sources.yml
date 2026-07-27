@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: nidd_raw
+    database: NIDD_DB
+    schema: SILVER
+    tables:
+      - name: silver_flows
+        identifier: SILVER_FLOWS
+        description: >
+          Raw Silver table loaded from MinIO by warehouse/load_silver_to_snowflake.py.
+          One row per network flow. See contracts/schemas.py (v1.0.1) for the
+          authoritative column definitions -- this file only declares the
+          dbt source pointer, not the schema itself.
+      - name: quality_log
+        identifier: QUALITY_LOG
+        description: >
+          Great Expectations batch validation results, loaded from MinIO by
+          warehouse/load_quality_log_to_snowflake.py. One row per Spark
+          micro-batch validated during streaming.

@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: mart_attack_summary
+    description: "Flow volume and traffic stats grouped by attack_type, attack_category, and attack_tool."
+    columns:
+      - name: attack_type
+        tests:
+          - not_null
+      - name: attack_category
+        description: "DoS, Reconnaissance, or Benign -- from the attack_type_category seed."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Benign', 'DoS', 'Reconnaissance']
+      - name: flow_count
+        tests:
+          - not_null
+
+  - name: mart_traffic_by_hour
+    description: "Flow volume per hour, split by label, attack_type, and category."
+    columns:
+      - name: flow_hour
+        tests:
+          - not_null
+      - name: label
+        tests:
+          - not_null
+
+  - name: mart_protocol_breakdown
+    description: "Protocol usage crossed with attack type."
+    columns:
+      - name: proto
+        tests:
+          - not_null
+
+  - name: mart_quality_summary
+    description: "Great Expectations pass rate over time, per hour."
+    columns:
+      - name: batch_hour
+        tests:
+          - not_null
+      - name: pass_rate_pct
+        tests:
+          - not_null

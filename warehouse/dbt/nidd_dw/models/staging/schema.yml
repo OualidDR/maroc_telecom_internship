@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_flows
+    description: "One row per network flow, cleaned column names, straight from SILVER_FLOWS."
+    columns:
+      - name: event_id
+        description: "Unique identifier per flow event, assigned by the replay simulator."
+        tests:
+          - unique
+          - not_null
+      - name: label
+        description: "Binary label: Benign or Malicious."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Benign', 'Malicious']
+      - name: attack_type
+        description: "Multiclass label: Benign or one of 8 attack types."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Benign', 'UDPFlood', 'HTTPFlood', 'SlowrateDoS',
+                         'TCPConnectScan', 'SYNScan', 'UDPScan', 'SYNFlood', 'ICMPFlood']
+      - name: proto
+        description: "Network protocol of the flow."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['icmp', 'udp', 'tcp', 'sctp', 'arp', 'llc', 'lldp', 'ipv6-icmp']
+      - name: dur
+        description: "Flow duration in seconds."
+        tests:
+          - not_null
