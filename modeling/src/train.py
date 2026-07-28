@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
+import os
 import pandas as pd
 import numpy as np
 import mlflow
@@ -19,6 +20,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_sample_weight
 import mlflow.xgboost
 
+mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SPLITS_DIR = REPO_ROOT / "modeling" / "artifacts" / "splits"

@@ -69,6 +69,27 @@ services:
       mc mb --ignore-existing local/gold;
       echo 'buckets ready';
       "
+  mlflow:
+  image: ghcr.io/mlflow/mlflow:v2.16.0
+  container_name: mlflow
+  ports:
+    - "5000:5000"
+  volumes:
+    - mlflow_data:/mlflow
+  environment:
+    - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+    - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+    - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+  command: >
+    mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination s3://mlflow-artifacts
+      --serve-artifacts
+  depends_on:
+    - minio
+
 
 volumes:
   redpanda-data:
