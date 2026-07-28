@@ -31,11 +31,10 @@ MODEL_URI = "models:/5g-nidd-attack-classifier@staging"
 SPLITS_DIR = Path("modeling/artifacts/splits")
 OUT_DIR = Path("modeling/artifacts/shap")
 
+mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 
 def load_model_and_data():
     """Load the registered model and the val set from parquet."""
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
-
     model = mlflow.xgboost.load_model(MODEL_URI)
     X_val = pd.read_parquet(SPLITS_DIR / "X_val.parquet")
     y_val = pd.read_parquet(SPLITS_DIR / "y_val.parquet").squeeze()

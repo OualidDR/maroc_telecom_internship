@@ -11,6 +11,7 @@ version, which is what you want for genuine model updates but not for
 re-registration of the same model.
 """
 
+import os
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
@@ -23,6 +24,7 @@ MODEL_NAME = "5g-nidd-attack-classifier"
 
 WINNING_RUN_ID = "7742eed4fa9d45a1a43d0d09f686e1db"
 
+mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 
 def register():
     client = MlflowClient()

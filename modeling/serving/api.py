@@ -32,6 +32,8 @@ MODEL_NAME = "5g-nidd-attack-classifier"
 MODEL_ALIAS = "staging"  # switch to "production" once end-to-end verified
 MODEL_URI = f"models:/{MODEL_NAME}@{MODEL_ALIAS}"
 
+mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+
 # When the API starts, we need the training-time label encoding to map
 # predicted class indices back to strings ("UDPFlood", "Benign", etc.).
 # We refit the encoder on the y_train parquet at startup.
@@ -56,7 +58,6 @@ state: dict = {
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: run startup logic before serving, cleanup after."""
     # === startup ===
-    mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
     print(f"Loading model from {MODEL_URI}...")
     state["model"] = mlflow.xgboost.load_model(MODEL_URI)
