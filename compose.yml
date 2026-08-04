@@ -54,9 +54,8 @@ services:
     volumes:
       - minio-data:/data
 
-  # One-shot container that creates the bronze/silver/gold/mlflow-artifacts
-  # buckets on startup, then exits. Safe to ignore its "exited (0)" status
-  # in `docker ps -a`.
+  # One-shot container that creates the bronze/silver/gold buckets on startup,
+  # then exits. Safe to ignore its "exited (0)" status in `docker ps -a`.
   minio-init:
     image: minio/mc:latest
     container_name: minio-init
@@ -72,32 +71,34 @@ services:
       echo 'buckets ready';
       "
 
-  # MLflow tracking server. SQLite backend on a Docker volume for now (fine
-  # for dev / small scale). Artifacts go to the mlflow-artifacts bucket on
-  # MinIO. `pip install boto3` is needed because the base MLflow image
-  # doesn't ship with the S3 library.
+  # MLflow tracking server -- SQLite backend (single writer: this container
+  # only, nothing else touches the .db file directly, so no concurrency
+  # issue), artifacts on the existing MinIO. Lightweight enough for a
+  # 16GB/2-core machine alongside Redpanda + MinIO, but keep an eye on RAM
+  # if all services run together (`free -h`).
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.16.0
     container_name: mlflow
     ports:
       - "5000:5000"
-    mem_limit: 512m
     volumes:
       - mlflow-data:/mlflow
     environment:
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      # Reuses the SAME MinIO credentials already defined for the minio
+      # service above -- no new/duplicate secret names.
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
     command: >
-      sh -c "pip install boto3 &&
-             mlflow server
-              --host 0.0.0.0
-              --port 5000
-              --backend-store-uri sqlite:////mlflow/mlflow.db
-              --artifacts-destination s3://mlflow-artifacts
-              --serve-artifacts"
+      mlflow server
+        --host 0.0.0.0
+        --port 5000
+        --backend-store-uri sqlite:////mlflow/mlflow.db
+        --artifacts-destination s3://mlflow-artifacts
+        --serve-artifacts
+    mem_limit: 400m
     depends_on:
-      - minio
+      - minio-init
 
 volumes:
   redpanda-data:
