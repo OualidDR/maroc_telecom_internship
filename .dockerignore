@@ -1,0 +1,28 @@
+# Keep the Docker build context small. The API image only needs contracts/,
+# modeling/serving, modeling/monitoring, modeling/artifacts/splits, and
+# modeling/artifacts/monitoring/reference.parquet (see modeling/serving/Dockerfile).
+# Everything below is excluded from the context so builds stay fast.
+
+.git
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+
+# Large data / local tracking state -- never needed in the image.
+data/
+mlruns/
+*.db
+mlflow.db
+
+# Heavy modeling artifacts the API does NOT load at runtime.
+modeling/notebooks/
+modeling/artifacts/processed/
+modeling/artifacts/shap/
+modeling/artifacts/monitoring/reports/
+
+# Misc local outputs / scratch.
+*.png
+batch_payload.json
+smoke_test_predict_raw.py
+test_snowflake.py

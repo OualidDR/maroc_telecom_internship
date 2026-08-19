@@ -20,12 +20,14 @@ Usage:
 
 import argparse
 import json
+import math
 import os
+import random
 import signal
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -82,12 +84,16 @@ def load_and_prepare(limit: int | None, seed: int) -> pd.DataFrame:
     return df
 
 
-def row_to_event(flow: dict, event_index: int) -> dict:
+def row_to_event(flow: dict, event_index: int, ingestion_ts: str | None = None) -> dict:
     """Wrap one row (already a plain dict) into the shared Kafka event envelope.
 
     Expects `flow` from df.to_dict('records') -- NaN values still need
     converting to None (JSON has no NaN), and numpy scalar types still need
     normalizing to native Python types for the JSON serializer.
+
+    ingestion_ts: if given, used as the event's ingestion_timestamp instead of
+    "now" -- lets the caller spread events across a synthetic time window (see
+    --spread-hours) so downstream hourly dashboards aren't all one bucket.
     """
     flow = {
         k: (None if isinstance(v, float) and pd.isna(v) else (v.item() if hasattr(v, "item") else v))
@@ -96,10 +102,68 @@ def row_to_event(flow: dict, event_index: int) -> dict:
 
     return {
         "event_id": f"evt_{event_index:08d}_{uuid.uuid4().hex[:8]}",
-        "ingestion_timestamp": datetime.now(timezone.utc).isoformat(),
+        "ingestion_timestamp": ingestion_ts or datetime.now(timezone.utc).isoformat(),
         "schema_version": SCHEMA_VERSION,
         "flow": flow,
     }
+
+
+# Reconnaissance classes get their own early "scan campaign" spike; everything
+# else malicious (floods / DoS) clusters in later "attack wave" spikes.
+_RECON_CLASSES = {"SYNScan", "UDPScan", "TCPConnectScan"}
+
+
+def build_synthetic_timestamp_fn(spread_hours: float, base: datetime, seed: int):
+    """Return fn(attack_type) -> ISO timestamp string placing each event on a
+    SYNTHETIC but realistic-looking SOC timeline.
+
+    IMPORTANT: these timestamps are fabricated for the demo dashboard. The
+    source CSV has no recoverable chronological order (see the exploration
+    report), so there is no real capture time to preserve. This deliberately
+    shapes a narrative instead of a flat line:
+
+      - Benign traffic follows a diurnal day/night wave (busy ~15:00, quiet ~03:00).
+      - Reconnaissance scans cluster in one early "scan campaign" spike.
+      - Floods / DoS cluster in three later "attack wave" spikes of varying size.
+
+    The result on the Power BI SOC pages: a calm daily baseline punctuated by a
+    recon probe and then DDoS bursts -- an attack story, not noise. Documented
+    as synthetic in the report.
+    """
+    span = spread_hours * 3600.0
+    n_hours = max(1, int(math.ceil(spread_hours)))
+    t0 = base - timedelta(seconds=span)
+    rng = random.Random(seed)
+
+    # Diurnal benign weight per hour bucket (cosine peaking at 15:00, floored so
+    # night never fully drops to zero).
+    hours = list(range(n_hours))
+    benign_weights = [
+        max(0.05, 0.55 + 0.45 * math.cos(2 * math.pi * ((t0 + timedelta(hours=h)).hour - 15) / 24))
+        for h in hours
+    ]
+
+    # Attack campaign windows as (center_fraction, sigma_fraction) of the span.
+    recon_window = (0.18, 0.03)
+    ddos_windows = [(0.36, 0.028), (0.58, 0.022), (0.82, 0.030)]
+    ddos_weights = [0.40, 0.35, 0.25]
+
+    def _gauss_offset(center: float, sigma: float) -> float:
+        frac = min(1.0, max(0.0, rng.gauss(center, sigma)))
+        return frac * span
+
+    def _timestamp_for(attack_type) -> str:
+        if attack_type is None or attack_type == "Benign":
+            hb = rng.choices(hours, weights=benign_weights, k=1)[0]
+            offset = min(hb * 3600 + rng.uniform(0, 3600), span)
+        elif attack_type in _RECON_CLASSES:
+            offset = _gauss_offset(*recon_window)
+        else:  # floods / DoS
+            center, sigma = rng.choices(ddos_windows, weights=ddos_weights, k=1)[0]
+            offset = _gauss_offset(center, sigma)
+        return (t0 + timedelta(seconds=offset)).isoformat()
+
+    return _timestamp_for
 
 
 def main():
@@ -116,6 +180,11 @@ def main():
                          help="Random seed for the shuffle (default: 42)")
     parser.add_argument("--log-every", type=int, default=1000,
                          help="Print progress every N events (default: 1000)")
+    parser.add_argument("--spread-hours", type=float, default=0.0,
+                         help="Spread ingestion_timestamps randomly across the last N hours "
+                              "instead of stamping them all 'now'. Use for demo dashboards so "
+                              "hourly time-series aren't collapsed into a single bucket "
+                              "(e.g. --spread-hours 48). 0 = real now (default).")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, _handle_shutdown)
@@ -142,12 +211,26 @@ def main():
     # streaming the full 1.2M-row dataset instead of a small test slice.
     records = df.to_dict("records")
 
+    # Synthetic ingestion time window. When --spread-hours > 0, each event is
+    # placed on a fabricated but realistic SOC timeline (diurnal benign baseline
+    # + recon/DDoS attack spikes -- see build_synthetic_timestamp_fn), keyed on
+    # the event's Attack Type. Seeded => reproducible. Documented as synthetic
+    # (the source CSV has no real chronological order -- see exploration report).
+    if args.spread_hours > 0:
+        ts_fn = build_synthetic_timestamp_fn(args.spread_hours, datetime.now(timezone.utc), args.seed)
+        print(f"Synthetic narrative timeline over the last {args.spread_hours:g}h "
+              f"(diurnal benign baseline + recon scan spike + DDoS attack waves).")
+    else:
+        ts_fn = None
+
     try:
         for i, flow in enumerate(records):
             if _shutdown_requested:
                 break
 
-            event = row_to_event(flow, i)
+            ingestion_ts = ts_fn(flow.get("Attack Type")) if ts_fn else None
+
+            event = row_to_event(flow, i, ingestion_ts)
             producer.send(args.topic, key=event["event_id"], value=event)
             sent += 1
 

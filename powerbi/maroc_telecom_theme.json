@@ -1,0 +1,56 @@
+{
+  "name": "Maroc Telecom",
+  "dataColors": [
+    "#E30613",
+    "#A00A0F",
+    "#F26D6D",
+    "#7A0A0A",
+    "#C0392B",
+    "#F5A3A3",
+    "#4D4D4D",
+    "#8C8C8C",
+    "#BFBFBF"
+  ],
+  "background": "#FFFFFF",
+  "foreground": "#252423",
+  "tableAccent": "#E30613",
+  "good": "#1E8449",
+  "neutral": "#8C8C8C",
+  "bad": "#E30613",
+  "maximum": "#E30613",
+  "center": "#F5A3A3",
+  "minimum": "#FFFFFF",
+  "textClasses": {
+    "title":    { "color": "#252423", "fontSize": 13, "fontFace": "Segoe UI Semibold" },
+    "header":   { "color": "#E30613", "fontSize": 12, "fontFace": "Segoe UI Semibold" },
+    "label":    { "color": "#252423", "fontSize": 10, "fontFace": "Segoe UI" },
+    "callout":  { "color": "#E30613", "fontSize": 40, "fontFace": "Segoe UI" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "background":   [{ "show": true, "color": { "solid": { "color": "#FFFFFF" } } }],
+        "border":       [{ "show": true, "color": { "solid": { "color": "#E6E6E6" } }, "radius": 6 }],
+        "visualHeader": [{ "show": true, "foreground": { "solid": { "color": "#E30613" } } }],
+        "title": [{
+          "show": true,
+          "fontColor": { "solid": { "color": "#252423" } },
+          "fontSize": 13,
+          "fontFamily": "Segoe UI Semibold",
+          "alignment": "left"
+        }]
+      }
+    },
+    "card": {
+      "*": {
+        "labels":    [{ "color": { "solid": { "color": "#E30613" } }, "fontSize": 34 }],
+        "categoryLabels": [{ "color": { "solid": { "color": "#666666" } }, "fontSize": 11 }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{ "color": { "solid": { "color": "#F7F7F7" } }, "transparency": 0 }]
+      }
+    }
+  }
+}

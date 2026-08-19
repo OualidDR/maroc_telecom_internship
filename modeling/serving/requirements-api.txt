@@ -1,0 +1,22 @@
+# Slim, API-only dependency set for the FastAPI inference container.
+# Deliberately NOT the repo's full requirements.txt -- the API doesn't need
+# pyspark / delta / great_expectations / dbt / snowflake, and pulling them in
+# would bloat the image by >1GB.
+#
+# Versions pinned to the env that TRAINED + LOGGED the registered model
+# (see the MLmodel file: xgb_version 3.2.0, mlflow_version 3.14.0). Keep these
+# in sync if you retrain, so the container loads the model without warnings.
+
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+pydantic==2.13.4
+
+mlflow==3.14.0
+xgboost==3.2.0
+scikit-learn==1.7.2
+pandas==2.2.2
+numpy==2.2.6
+pyarrow                 # read_parquet for the splits (label encoder + feature columns)
+
+evidently==0.7.21       # imported by modeling/monitoring/drift.py (the /drift endpoint)
+boto3==1.43.67          # MinIO/S3 artifact download when MLflow resolves an s3:// source

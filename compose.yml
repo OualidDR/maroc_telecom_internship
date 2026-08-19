@@ -77,7 +77,15 @@ services:
   # 16GB/2-core machine alongside Redpanda + MinIO, but keep an eye on RAM
   # if all services run together (`free -h`).
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.16.0
+    # Built from mlflow.Dockerfile = official MLflow image + boto3 (the stock
+    # image lacks boto3, so S3/MinIO artifact writes 500). The base tag must
+    # match the MLflow version that logged/registered the model (MLmodel records
+    # mlflow_version 3.14.0) -- a 2.x server cannot serve a 3.x-registered model.
+    # If that base tag doesn't pull, edit mlflow.Dockerfile to the closest v3.x
+    # tag matching your client's `mlflow` version (pip show mlflow).
+    build:
+      context: .
+      dockerfile: mlflow.Dockerfile
     container_name: mlflow
     ports:
       - "5000:5000"
@@ -96,9 +104,53 @@ services:
         --backend-store-uri sqlite:////mlflow/mlflow.db
         --artifacts-destination s3://mlflow-artifacts
         --serve-artifacts
-    mem_limit: 400m
+        --allowed-hosts "*"
+        --cors-allowed-origins "*"
+    # MLflow 3.x is much heavier than 2.16: OOM-killed (exit 137) at 400m, 1g,
+    # and pinned at the ceiling (99.9%) at 2g -- 3g gives real headroom for
+    # model registration/serving. (Your Docker VM has ~8G total, so this still
+    # fits alongside minio + api.) --allowed-hosts/--cors let the api container
+    # (a different host than localhost) reach it; 3.x's default security
+    # middleware is localhost-only and would otherwise reject it.
+    mem_limit: 3g
     depends_on:
       - minio-init
+
+  # FastAPI inference service. Loads models:/5g-nidd-attack-classifier@staging
+  # from the mlflow container at startup, then serves /predict, /predict/raw,
+  # /predict/batch, /drift. Build context is the repo root (".") so the image
+  # can copy contracts/ + modeling/ (see modeling/serving/Dockerfile).
+  #
+  # PREREQUISITE: the model must already be registered on the mlflow server
+  # BEFORE this starts, otherwise the startup model-load raises and the
+  # container exits. Register once (with the tracking URI pointing at the
+  # server) via: python modeling/src/register_model.py
+  # `restart: on-failure` lets it keep retrying until the model is there.
+  api:
+    build:
+      context: .
+      dockerfile: modeling/serving/Dockerfile
+    container_name: nidd-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      # Needed only if MLflow resolves the model artifact to an s3:// source
+      # (vs proxying through the tracking server). Harmless to always set;
+      # reuses the same MinIO credentials as the other services.
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    mem_limit: 1g
+    restart: on-failure
+    depends_on:
+      - mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
 volumes:
   redpanda-data:

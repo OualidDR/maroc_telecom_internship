@@ -64,6 +64,41 @@ class BatchFlowRequest(BaseModel):
     )
 
 
+class RawFlowRequest(BaseModel):
+    """A batch of RAW flows (39 contract features, pre-preprocessing).
+
+    Unlike BatchFlowRequest, these are the raw feature values straight from
+    the Silver layer -- no one-hot encoding, no sentinel fills, no indicators.
+    The /predict/raw endpoint runs the full training-time preprocessing
+    server-side, so this stays the single source of truth for feature logic.
+
+    Values are Optional/Any because raw flows carry structural nulls (e.g.
+    dTtl, SrcWin) and a string event_id passthrough alongside numeric fields.
+    """
+    flows: list[dict] = Field(
+        ...,
+        max_length=1000,
+        description="List of raw contract-feature dicts (may include 'event_id'). Max 1000.",
+    )
+
+
+class RawPrediction(BaseModel):
+    """One prediction from /predict/raw, keyed by the passthrough event_id."""
+    event_id: Optional[str] = None
+    predicted_class: str
+    probability: float
+    model_version: str
+    schema_version: str
+
+
+class RawPredictionResponse(BaseModel):
+    """Predictions for a raw-flow batch, in the same order as the input flows."""
+    predictions: list[RawPrediction]
+    n_flows: int
+    model_version: str
+    schema_version: str
+
+
 class BatchPredictionResponse(BaseModel):
     """Vectorized predictions in the same order as the input flows."""
     predictions: list[PredictionResponse]

@@ -19,7 +19,16 @@ Prereqs (see README section this script was generated with):
     docker compose up -d   (redpanda + minio must be running)
 """
 
+import os
 import sys
+
+# On Windows, bare "python"/"python3" hits the Microsoft Store app-execution
+# alias stub instead of the venv interpreter, so Spark's Python workers fail to
+# launch ("Python was not found" / "Python worker failed to connect back").
+# Pin PySpark to THIS interpreter (the venv one running the driver). Harmless
+# on Linux/macOS. Must be set before the SparkSession is built.
+os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -46,7 +55,10 @@ SILVER_PATH = "s3a://silver/flows"
 BRONZE_CHECKPOINT = "s3a://bronze/_checkpoints/flows"
 SILVER_CHECKPOINT = "s3a://silver/_checkpoints/flows"
 
-MAX_OFFSETS_PER_TRIGGER = 500  # small batches, gentle on 2 cores / limited RAM
+MAX_OFFSETS_PER_TRIGGER = 5000  # ~500 rows/s drain (5000 per 10s trigger).
+# At the old 500, draining a 150k run took ~50 min (50 rows/s). 5000 keeps each
+# micro-batch small enough for 2 cores / limited RAM while draining 150k in
+# ~5 min. Lower it back toward 500 if you see memory pressure on the GX batch.
 
 
 def build_spark() -> SparkSession:

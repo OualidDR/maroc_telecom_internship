@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from sklearn.preprocessing import LabelEncoder
 from contextlib import asynccontextmanager
 
-from contracts.schemas import SCHEMA_VERSION
+from contracts.schemas import SCHEMA_VERSION, FEATURE_SCHEMA, NULL_SENTINEL
 from modeling.serving.schemas import (
     FlowFeatures,
     PredictionResponse,
@@ -21,7 +21,14 @@ from modeling.serving.schemas import (
     TopFeature,
     BatchFlowRequest,           # new
     BatchPredictionResponse,    # new
+    RawFlowRequest,             # raw (pre-preprocessing) input for /predict/raw
+    RawPredictionResponse,      # response model for /predict/raw
 )
+
+# Raw feature groups, derived from the shared contract so the preprocessing
+# below stays in sync with contracts/schemas.py automatically.
+NUMERIC_RAW_COLS = [f.name for f in FEATURE_SCHEMA if f.dtype in ("float", "int")]
+CATEGORICAL_RAW_COLS = [f.name for f in FEATURE_SCHEMA if f.dtype == "category"]
 
 
 # ---------------------------------------------------------------------------
@@ -287,3 +294,106 @@ def predict_batch(request: BatchFlowRequest, explain: bool = False):
         model_version=str(state["model_version"]),
         schema_version=SCHEMA_VERSION,
     )
+
+
+def _preprocess_raw_flows(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Turn raw contract-feature flows into model-ready input.
+
+    Mirrors modeling/src/preprocessing.load_clean_csv EXACTLY (minus the CSV
+    read and label handling), so training and serving share one feature
+    definition:
+        1. is_tcp / has_dst_reply indicators (computed from RAW values, before
+           any fill -- has_dst_reply depends on dTtl being null-or-not, is_tcp
+           on the raw Proto string, so order matters).
+        2. sentinel fill (-1) on numeric feature columns.
+        3. one-hot encode the categorical columns.
+        4. reindex onto the model's exact training columns -- this adds any
+           one-hot columns missing from THIS batch (e.g. a proto value not
+           present) as 0, drops event_id / labels / extras, and fixes column
+           order. This is the step that makes a partial batch safe.
+    """
+    df = raw_df.copy()
+
+    # 0. Normalize column casing to the contract's casing (Proto, Dur, sTtl...).
+    #    The Spark->Delta path already sends contract-cased columns, so this is
+    #    a no-op there. It's defense-in-depth against a caller sending
+    #    UPPERCASE columns (e.g. anything sourced from Snowflake): without it,
+    #    a case mismatch would silently fill every feature with 0 in step 4 and
+    #    the model would return confident garbage with NO error raised.
+    known_features = NUMERIC_RAW_COLS + CATEGORICAL_RAW_COLS
+    lower_to_contract = {name.lower(): name for name in known_features}
+    df = df.rename(columns=lambda c: lower_to_contract.get(c.lower(), c))
+
+    # 1. Indicators, from raw values (before fills / dummies drop the sources).
+    df["is_tcp"] = (df["Proto"] == "tcp").astype(int) if "Proto" in df.columns else 0
+    df["has_dst_reply"] = df["dTtl"].notna().astype(int) if "dTtl" in df.columns else 0
+
+    # 2. Sentinel fill on the numeric feature columns that are present.
+    present_numeric = [c for c in NUMERIC_RAW_COLS if c in df.columns]
+    df[present_numeric] = df[present_numeric].fillna(NULL_SENTINEL)
+
+    # 3. One-hot the categorical columns that are present.
+    present_categorical = [c for c in CATEGORICAL_RAW_COLS if c in df.columns]
+    df = pd.get_dummies(df, columns=present_categorical, drop_first=False)
+
+    # 4. Align to the model's training columns (fills missing dummies with 0,
+    #    drops event_id/labels/anything extra, guarantees order). Cast to float
+    #    so bool dummies and sentinel numerics share one dtype for the model.
+    X = df.reindex(columns=state["feature_columns"], fill_value=0.0).astype(float)
+    return X
+
+
+@app.post("/predict/raw", response_model=RawPredictionResponse)
+def predict_raw(request: RawFlowRequest):
+    """Classify a batch of RAW flows (39 contract features, pre-preprocessing).
+
+    This is the endpoint the Spark pipeline (serving/predict_client.py) calls:
+    it sends raw Silver-layer flows and the API runs the full training-time
+    preprocessing server-side. Keeping preprocessing here (not in Spark) means
+    the one-hot / sentinel / indicator logic lives in exactly one place.
+
+    Request:  {"flows": [{<raw contract features>, "event_id": "..."}]}
+    Response: {"predictions": [{"event_id", "predicted_class", "probability",
+                                "model_version", "schema_version"}], ...}
+    event_id (if provided) is passed straight through so the caller can join
+    predictions back onto the originating Silver rows.
+    """
+    if state["model"] is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    if not request.flows:
+        raise HTTPException(status_code=422, detail="Empty batch")
+
+    raw_df = pd.DataFrame(request.flows)
+
+    # Keep event_id aside (it's a passthrough key, never a model feature).
+    if "event_id" in raw_df.columns:
+        event_ids = raw_df["event_id"].tolist()
+    else:
+        event_ids = [None] * len(raw_df)
+
+    try:
+        X = _preprocess_raw_flows(raw_df)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Preprocessing failed: {e}")
+
+    proba_matrix = state["model"].predict_proba(X)   # (n_flows, n_classes)
+    pred_indices = np.argmax(proba_matrix, axis=1)
+    classes = state["label_encoder"].classes_
+
+    predictions = []
+    for i, pred_idx in enumerate(pred_indices):
+        predictions.append({
+            "event_id": None if event_ids[i] is None else str(event_ids[i]),
+            "predicted_class": str(classes[pred_idx]),
+            "probability": float(proba_matrix[i][pred_idx]),
+            "model_version": str(state["model_version"]),
+            "schema_version": SCHEMA_VERSION,
+        })
+
+    return {
+        "predictions": predictions,
+        "n_flows": len(predictions),
+        "model_version": str(state["model_version"]),
+        "schema_version": SCHEMA_VERSION,
+    }
